@@ -22,3 +22,15 @@ common stressors:
 
 Omit `--timeout` to run until the container is stopped. Run with no args to see
 the full `stress-ng` usage.
+
+## Tags
+
+`ghcr.io/meshx-org/stress` is published as:
+
+- `:latest` — newest build
+- `:<version>` — the stress-ng version, e.g. `:0.18.06`
+- `:<major.minor>` — e.g. `:0.18`
+- `:sha-<short>` — the exact commit (byte-immutable)
+
+Version tags float with Alpine patches; pin `:sha-<short>` or a digest for an
+immutable image. A matching git tag `v<version>` is pushed per stress-ng version.

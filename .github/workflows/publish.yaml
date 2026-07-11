@@ -1,7 +1,10 @@
 name: publish
 
-# Build + push ghcr.io/meshx-org/stress on every push to main (and on demand).
-# Self-contained: uses only the built-in GITHUB_TOKEN — no external secrets.
+# Build + push ghcr.io/meshx-org/stress. Tags the image with the actual stress-ng
+# version it ships (not just :latest) and keeps a matching git tag in sync, so
+# consumers can pin a version and the repo history tracks what shipped. The
+# autopilot rebuild (schedule below) re-tags automatically as upstream updates.
+# Self-contained: only the built-in GITHUB_TOKEN — no external secrets.
 
 on:
   workflow_dispatch:
@@ -14,8 +17,8 @@ on:
     - cron: '0 6 * * 1' # 06:00 UTC every Monday
 
 permissions:
-  contents: read
-  packages: write
+  contents: write # push the version git tag
+  packages: write # push the image
 
 concurrency:
   group: publish-${{ github.ref }}
@@ -38,21 +41,65 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
+      # Build once locally so we can read the stress-ng version baked into the
+      # image; the push build below reuses these layers from the gha cache.
+      - name: Build (load) to read the stress-ng version
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          load: true
+          tags: stress:probe
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract stress-ng version
+        id: ver
+        run: |
+          set -euo pipefail
+          full=$(docker run --rm --entrypoint stress-ng stress:probe --version)
+          version=$(printf '%s' "$full" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          [ -n "$version" ] || { echo "::error::could not parse stress-ng version from: $full"; exit 1; }
+          echo "version=$version"    >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
+          echo "==> stress-ng $version"
+
+      - name: Docker metadata (version tags + label)
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
         with:
           images: ghcr.io/${{ github.repository }} # ghcr.io/meshx-org/stress
+          # :latest + :<full version> + :<major.minor> + :sha-<short>. The version
+          # tags float with alpine patches; pin :sha-<short> or a digest for
+          # byte-immutability.
           tags: |
-            type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=raw,value=${{ steps.ver.outputs.minor }}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
 
       - name: Build and push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
-          # amd64 only — the meshx guest VMs are x86_64.
-          platforms: linux/amd64
+          platforms: linux/amd64 # meshx guest VMs are x86_64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+      # Keep a git tag in sync with the published stress-ng version so the repo
+      # history tracks exactly which versions shipped. Idempotent: only creates
+      # the tag the first time a given version is built (later rebuilds skip).
+      - name: Sync git tag to the stress-ng version
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.ver.outputs.version }}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "git tag $tag already exists — in sync, nothing to do"
+          else
+            git tag "$tag"
+            git push origin "$tag"
+            echo "==> pushed git tag $tag"
+          fi
