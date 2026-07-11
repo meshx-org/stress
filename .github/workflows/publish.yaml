@@ -1,18 +1,22 @@
 name: publish
 
-# Build + push ghcr.io/meshx-org/stress. Tags the image with the actual stress-ng
-# version it ships (not just :latest) and keeps a matching git tag in sync, so
-# consumers can pin a version and the repo history tracks what shipped. The
-# autopilot rebuild (schedule below) re-tags automatically as upstream updates.
-# Self-contained: only the built-in GITHUB_TOKEN — no external secrets.
+# Build + push ghcr.io/meshx-org/stress, pinned to the stress-ng version recorded
+# in the committed VERSION file (kept current by update-version.yaml). The build
+# arg makes the image reproducible and in lockstep with the file; tags derive
+# from it (:latest, :<version>, :<major.minor>, :sha-<short>) and a matching git
+# tag is pushed. Self-contained: only the built-in GITHUB_TOKEN.
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-  # Autopilot: weekly rebuild so the image picks up alpine + stress-ng security
-  # patches (the alpine:3 base tag moves under it) with zero manual work.
+    paths:
+      - VERSION
+      - Dockerfile
+      - .github/workflows/publish.yaml
+  # Weekly rebuild so the pinned image still picks up alpine:3 base security
+  # patches even when the stress-ng version hasn't moved.
   schedule:
     - cron: '0 6 * * 1' # 06:00 UTC every Monday
 
@@ -31,6 +35,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Read pinned stress-ng version
+        id: ver
+        run: |
+          set -euo pipefail
+          apk=$(tr -d ' \t\n' < VERSION)
+          [ -n "$apk" ] || { echo "::error::VERSION is empty"; exit 1; }
+          version="${apk%-r*}" # 0.21.02-r0 -> 0.21.02 (drop the alpine -rN suffix)
+          echo "apk=$apk"           >> "$GITHUB_OUTPUT"
+          echo "version=$version"   >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
+          echo "==> building stress-ng $apk (tags from $version)"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
 
@@ -41,36 +57,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Build once locally so we can read the stress-ng version baked into the
-      # image; the push build below reuses these layers from the gha cache.
-      - name: Build (load) to read the stress-ng version
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
-        with:
-          context: .
-          load: true
-          tags: stress:probe
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract stress-ng version
-        id: ver
-        run: |
-          set -euo pipefail
-          full=$(docker run --rm --entrypoint stress-ng stress:probe --version)
-          version=$(printf '%s' "$full" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-          [ -n "$version" ] || { echo "::error::could not parse stress-ng version from: $full"; exit 1; }
-          echo "version=$version"    >> "$GITHUB_OUTPUT"
-          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
-          echo "==> stress-ng $version"
-
       - name: Docker metadata (version tags + label)
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302
         with:
           images: ghcr.io/${{ github.repository }} # ghcr.io/meshx-org/stress
-          # :latest + :<full version> + :<major.minor> + :sha-<short>. The version
-          # tags float with alpine patches; pin :sha-<short> or a digest for
-          # byte-immutability.
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ steps.ver.outputs.version }}
@@ -85,13 +76,15 @@ jobs:
           context: .
           platforms: linux/amd64 # meshx guest VMs are x86_64
           push: true
+          build-args: |
+            STRESS_NG_VERSION=${{ steps.ver.outputs.apk }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      # Keep a git tag in sync with the published stress-ng version so the repo
-      # history tracks exactly which versions shipped. Idempotent: only creates
-      # the tag the first time a given version is built (later rebuilds skip).
+      # Tag the repo with the shipped stress-ng version. Idempotent: only creates
+      # the tag the first time a given version is built.
       - name: Sync git tag to the stress-ng version
         run: |
           set -euo pipefail
@@ -102,33 +95,4 @@ jobs:
             git tag "$tag"
             git push origin "$tag"
             echo "==> pushed git tag $tag"
-          fi
-
-      # Record the version on main + keep the schedule alive. A default-branch
-      # COMMIT (not a tag push) is what resets GitHub's 60-day disable timer.
-      # Commit only when the version changes; if it hasn't and the repo is nearing
-      # 60 days idle, commit an empty heartbeat. `[skip ci]` on both so they never
-      # re-trigger this workflow.
-      - name: Record version + keep schedule alive
-        run: |
-          set -euo pipefail
-          version="${{ steps.ver.outputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          if [ "$(cat VERSION 2>/dev/null || true)" != "$version" ]; then
-            echo "$version" > VERSION
-            git add VERSION
-            git commit -m "chore: stress-ng $version [skip ci]"
-            git push origin HEAD:main
-            echo "==> recorded stress-ng $version"
-          else
-            age_days=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
-            if [ "$age_days" -ge 50 ]; then
-              git commit --allow-empty -m "chore: keepalive (${age_days}d idle) [skip ci]"
-              git push origin HEAD:main
-              echo "==> keepalive commit (${age_days}d idle)"
-            else
-              echo "version unchanged, repo fresh (${age_days}d) — no commit needed"
-            fi
           fi

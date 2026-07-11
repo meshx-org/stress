@@ -1,0 +1,63 @@
+name: update-version
+
+# Regular version bump: resolve the latest stress-ng version available in alpine:3
+# and commit it to VERSION when it changes. That commit is the single source of
+# truth the pinned build (publish.yaml) consumes — bumping the file triggers a
+# rebuild at the new version. Also doubles as the repo's keepalive: a
+# default-branch commit is what resets GitHub's 60-day scheduled-workflow disable
+# timer (a tag push does not), and a heartbeat covers long upstream stalls.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * *' # 05:00 UTC daily — catch new releases promptly
+
+permissions:
+  contents: write # commit VERSION / heartbeat
+
+concurrency:
+  group: update-version
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Resolve latest stress-ng apk version
+        id: latest
+        run: |
+          set -euo pipefail
+          v=$(docker run --rm alpine:3 sh -c 'apk update -q >/dev/null 2>&1; apk list stress-ng 2>/dev/null' \
+                | grep -oE 'stress-ng-[0-9][^ ]*' | sed 's/^stress-ng-//' | sort -V | tail -1)
+          [ -n "$v" ] || { echo "::error::could not resolve a stress-ng version"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "==> latest stress-ng in alpine:3: $v"
+
+      - name: Commit the version (or heartbeat)
+        run: |
+          set -euo pipefail
+          v="${{ steps.latest.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$(cat VERSION 2>/dev/null || true)" != "$v" ]; then
+            echo "$v" > VERSION
+            git add VERSION
+            # No [skip ci]: we WANT this push to trigger publish and build $v.
+            git commit -m "chore: stress-ng $v"
+            git push origin HEAD:main
+            echo "==> bumped VERSION to $v"
+          else
+            age=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+            if [ "$age" -ge 50 ]; then
+              # Repo nearing the 60-day disable; nudge the timer without churn.
+              git commit --allow-empty -m "chore: keepalive (${age}d idle) [skip ci]"
+              git push origin HEAD:main
+              echo "==> keepalive commit (${age}d idle)"
+            else
+              echo "VERSION already $v (repo ${age}d idle) — nothing to do"
+            fi
+          fi

@@ -34,3 +34,9 @@ the full `stress-ng` usage.
 
 Version tags float with Alpine patches; pin `:sha-<short>` or a digest for an
 immutable image. A matching git tag `v<version>` is pushed per stress-ng version.
+
+The exact `stress-ng` version is pinned in the [`VERSION`](VERSION) file and fed
+to the Docker build as `--build-arg STRESS_NG_VERSION`. A daily job
+([`update-version.yaml`](.github/workflows/update-version.yaml)) bumps it when a
+new release lands in Alpine, which triggers a pinned rebuild; [`smoke.yaml`](.github/workflows/smoke.yaml)
+builds and runs the image on every change to prove it works.
