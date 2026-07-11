@@ -1,8 +1,9 @@
-# stress-ng on Alpine — a modern, v2/OCI replacement for the ancient
-# Docker-Schema-1 `progrium/stress` image. Keeps the good parts of
-# github.com/progrium/docker-stress: a verbose stress entrypoint with NO baked
-# workload; the load args are supplied per run.
-FROM alpine:3.20
+# stress-ng on Alpine — a verbose stress entrypoint with NO baked workload; the
+# load args are supplied per run (the good parts of github.com/progrium/docker-stress).
+# Pinned to the `alpine:3` tag (not a patch pin) so the scheduled rebuild in
+# .github/workflows/publish.yaml auto-tracks the latest 3.x base + stress-ng with
+# no manual bumps.
+FROM alpine:3
 RUN apk add --no-cache stress-ng
 
 LABEL org.opencontainers.image.title="stress" \

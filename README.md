@@ -4,11 +4,6 @@ A minimal container image for generating CPU / memory / I/O / disk load —
 [stress-ng](https://github.com/ColinIanKing/stress-ng) on Alpine. Published to
 `ghcr.io/meshx-org/stress`.
 
-A v2/OCI replacement for the ancient (Docker Schema-1) `progrium/stress` image,
-keeping the good parts of
-[progrium/docker-stress](https://github.com/progrium/docker-stress): a verbose
-entrypoint with **no baked workload** — you always supply the load.
-
 ## Usage
 
 ```sh
@@ -27,11 +22,3 @@ common stressors:
 
 Omit `--timeout` to run until the container is stopped. Run with no args to see
 the full `stress-ng` usage.
-
-## Publishing
-
-`.github/workflows/publish.yaml` builds and pushes `ghcr.io/meshx-org/stress` on
-every push to `main` (`:latest` + `:sha-<short>`), using only the built-in
-`GITHUB_TOKEN`. After the first publish, set the package's visibility to
-**public** (repo → Packages → stress → Package settings) so it can be pulled
-anonymously — e.g. by the meshx rootfs pipeline.
