@@ -103,3 +103,32 @@ jobs:
             git push origin "$tag"
             echo "==> pushed git tag $tag"
           fi
+
+      # Record the version on main + keep the schedule alive. A default-branch
+      # COMMIT (not a tag push) is what resets GitHub's 60-day disable timer.
+      # Commit only when the version changes; if it hasn't and the repo is nearing
+      # 60 days idle, commit an empty heartbeat. `[skip ci]` on both so they never
+      # re-trigger this workflow.
+      - name: Record version + keep schedule alive
+        run: |
+          set -euo pipefail
+          version="${{ steps.ver.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$(cat VERSION 2>/dev/null || true)" != "$version" ]; then
+            echo "$version" > VERSION
+            git add VERSION
+            git commit -m "chore: stress-ng $version [skip ci]"
+            git push origin HEAD:main
+            echo "==> recorded stress-ng $version"
+          else
+            age_days=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+            if [ "$age_days" -ge 50 ]; then
+              git commit --allow-empty -m "chore: keepalive (${age_days}d idle) [skip ci]"
+              git push origin HEAD:main
+              echo "==> keepalive commit (${age_days}d idle)"
+            else
+              echo "version unchanged, repo fresh (${age_days}d) — no commit needed"
+            fi
+          fi
