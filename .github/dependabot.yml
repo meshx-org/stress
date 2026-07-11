@@ -1,9 +1,9 @@
 version: 2
 
 updates:
-  # Base image in the Dockerfile. `alpine:3` moves patch/minor on its own (the
-  # weekly publish rebuild picks those up); Dependabot opens a PR only for a
-  # bigger move it can't track silently — e.g. a new `alpine:4` major.
+  # Base image in the Dockerfile. Alpine 3.x minor/patch is bumped automatically
+  # (matched with stress-ng) by update-version.yaml, so Dependabot is scoped to
+  # surface only a major base-OS jump — e.g. a new `alpine:4` — for review.
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -12,6 +12,11 @@ updates:
       prefix: chore
     labels:
       - dependencies
+    ignore:
+      - dependency-name: alpine
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
 
   # Keep the SHA-pinned actions in the workflows current. Grouped into one PR to
   # keep the noise down.

@@ -1,6 +1,6 @@
 name: smoke
 
-# Sanity check: build the image at the pinned VERSION and actually run it, so a
+# Sanity check: build the image at the pinned versions and actually run it, so a
 # broken base, a bad pin, or a non-functional binary is caught before (and after)
 # publish. Self-contained — builds locally, no registry needed.
 
@@ -8,14 +8,12 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - VERSION
       - Dockerfile
       - .github/workflows/smoke.yaml
   push:
     branches:
       - main
     paths:
-      - VERSION
       - Dockerfile
       - .github/workflows/smoke.yaml
 
@@ -35,20 +33,17 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Build the pinned image
-        run: |
-          set -euo pipefail
-          apk=$(tr -d ' \t\n' < VERSION)
-          echo "building stress-ng $apk"
-          docker build --build-arg "STRESS_NG_VERSION=$apk" -t stress:smoke .
+        run: docker build -t stress:smoke .
 
       - name: It reports the pinned version
         run: |
           set -euo pipefail
+          want=$(grep -oE '^ARG STRESS_NG_VERSION=[0-9][0-9A-Za-z.-]*' Dockerfile | cut -d= -f2)
+          want="${want%-r*}" # 0.21.02-r0 -> 0.21.02
           out=$(docker run --rm --entrypoint stress-ng stress:smoke --version)
           echo "$out"
-          want=$(tr -d ' \t\n' < VERSION); want="${want%-r*}" # 0.21.02-r0 -> 0.21.02
           echo "$out" | grep -qF "$want" || {
-            echo "::error::image reports a different version than VERSION ($want)"; exit 1; }
+            echo "::error::image reports a different version than the pin ($want)"; exit 1; }
 
       - name: It runs a CPU stressor and exits cleanly
         run: docker run --rm stress:smoke --cpu 1 --timeout 3s --metrics-brief

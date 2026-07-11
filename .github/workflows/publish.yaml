@@ -1,10 +1,10 @@
 name: publish
 
-# Build + push ghcr.io/meshx-org/stress, pinned to the stress-ng version recorded
-# in the committed VERSION file (kept current by update-version.yaml). The build
-# arg makes the image reproducible and in lockstep with the file; tags derive
-# from it (:latest, :<version>, :<major.minor>, :sha-<short>) and a matching git
-# tag is pushed. Self-contained: only the built-in GITHUB_TOKEN.
+# Build + push ghcr.io/meshx-org/stress at the versions pinned in the Dockerfile
+# (ALPINE_VERSION + STRESS_NG_VERSION, kept current by update-version.yaml). Tags
+# encode both, node-image style: :latest, :<version>, :<major.minor>,
+# :<version>-alpine<alpine>, :sha-<short>, plus a matching git tag. Self-contained:
+# only the built-in GITHUB_TOKEN.
 
 on:
   workflow_dispatch:
@@ -12,11 +12,10 @@ on:
     branches:
       - main
     paths:
-      - VERSION
       - Dockerfile
       - .github/workflows/publish.yaml
-  # Weekly rebuild so the pinned image still picks up alpine:3 base security
-  # patches even when the stress-ng version hasn't moved.
+  # Weekly rebuild so the pinned image still picks up Alpine base security patches
+  # within the pinned minor even when the versions haven't moved.
   schedule:
     - cron: '0 6 * * 1' # 06:00 UTC every Monday
 
@@ -35,17 +34,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Read pinned stress-ng version
+      - name: Read pinned versions from the Dockerfile
         id: ver
         run: |
           set -euo pipefail
-          apk=$(tr -d ' \t\n' < VERSION)
-          [ -n "$apk" ] || { echo "::error::VERSION is empty"; exit 1; }
-          version="${apk%-r*}" # 0.21.02-r0 -> 0.21.02 (drop the alpine -rN suffix)
-          echo "apk=$apk"           >> "$GITHUB_OUTPUT"
-          echo "version=$version"   >> "$GITHUB_OUTPUT"
-          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
-          echo "==> building stress-ng $apk (tags from $version)"
+          alpine=$(grep -oE '^ARG ALPINE_VERSION=[0-9][0-9.]*' Dockerfile | head -1 | cut -d= -f2)
+          apk=$(grep -oE '^ARG STRESS_NG_VERSION=[0-9][0-9A-Za-z.-]*' Dockerfile | head -1 | cut -d= -f2)
+          [ -n "$alpine" ] && [ -n "$apk" ] || { echo "::error::could not read pinned versions"; exit 1; }
+          version="${apk%-r*}" # 0.21.02-r0 -> 0.21.02
+          {
+            echo "alpine=$alpine"
+            echo "version=$version"
+            echo "minor=${version%.*}"
+          } >> "$GITHUB_OUTPUT"
+          echo "==> stress-ng $version (apk $apk) on alpine $alpine"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
@@ -66,6 +68,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=${{ steps.ver.outputs.version }}
             type=raw,value=${{ steps.ver.outputs.minor }}
+            type=raw,value=${{ steps.ver.outputs.version }}-alpine${{ steps.ver.outputs.alpine }}
             type=sha,prefix=sha-,format=short
           labels: |
             org.opencontainers.image.version=${{ steps.ver.outputs.version }}
@@ -76,8 +79,6 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
-          build-args: |
-            STRESS_NG_VERSION=${{ steps.ver.outputs.apk }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

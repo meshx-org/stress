@@ -25,18 +25,20 @@ the full `stress-ng` usage.
 
 ## Tags
 
-`ghcr.io/meshx-org/stress` is published as:
+`ghcr.io/meshx-org/stress` is published as (node-image style — both the app and
+the base OS version are visible):
 
 - `:latest` — newest build
-- `:<version>` — the stress-ng version, e.g. `:0.18.06`
-- `:<major.minor>` — e.g. `:0.18`
+- `:<version>` — the stress-ng version, e.g. `:0.21.02`
+- `:<major.minor>` — e.g. `:0.21`
+- `:<version>-alpine<alpine>` — fully qualified, e.g. `:0.21.02-alpine3.24`
 - `:sha-<short>` — the exact commit (byte-immutable)
 
-Version tags float with Alpine patches; pin `:sha-<short>` or a digest for an
-immutable image. A matching git tag `v<version>` is pushed per stress-ng version.
+A matching git tag `v<version>` is pushed per stress-ng version.
 
-The exact `stress-ng` version is pinned in the [`VERSION`](VERSION) file and fed
-to the Docker build as `--build-arg STRESS_NG_VERSION`. A daily job
-([`update-version.yaml`](.github/workflows/update-version.yaml)) bumps it when a
-new release lands in Alpine, which triggers a pinned rebuild; [`smoke.yaml`](.github/workflows/smoke.yaml)
-builds and runs the image on every change to prove it works.
+Both the base OS and stress-ng are pinned in the [`Dockerfile`](Dockerfile) as
+`ARG ALPINE_VERSION` / `ARG STRESS_NG_VERSION`.
+[`update-version.yaml`](.github/workflows/update-version.yaml) (daily) bumps them
+as a matched pair when Alpine 3.x ships a new stress-ng; Dependabot surfaces a
+major Alpine bump; [`smoke.yaml`](.github/workflows/smoke.yaml) builds and runs
+the image on every change to prove it works.
