@@ -42,3 +42,26 @@ Both the base OS and stress-ng are pinned in the [`Dockerfile`](Dockerfile) as
 as a matched pair when Alpine 3.x ships a new stress-ng; Dependabot surfaces a
 major Alpine bump; [`smoke.yaml`](.github/workflows/smoke.yaml) builds and runs
 the image on every change to prove it works.
+
+## Supply chain
+
+Every published image is signed and comes with an SBOM and SLSA build provenance,
+all keyless (Sigstore + GitHub OIDC — no long-lived keys). To verify:
+
+```sh
+IMAGE=ghcr.io/meshx-org/stress:latest
+
+# Cosign signature (identity = this repo's publish workflow)
+cosign verify "$IMAGE" \
+  --certificate-identity-regexp '^https://github.com/meshx-org/stress/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# SLSA build provenance + SBOM attestation
+gh attestation verify "oci://$IMAGE" --owner meshx-org
+
+# Pull the SBOM (SPDX) attached to the image
+cosign download sbom "$IMAGE"
+```
+
+The SBOM is also published as a workflow artifact (`stress-sbom.spdx.json`) on
+each `publish` run.
