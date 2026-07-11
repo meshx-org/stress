@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # Base image in the Dockerfile. `alpine:3` moves patch/minor on its own (the
+  # weekly publish rebuild picks those up); Dependabot opens a PR only for a
+  # bigger move it can't track silently — e.g. a new `alpine:4` major.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    labels:
+      - dependencies
+
+  # Keep the SHA-pinned actions in the workflows current. Grouped into one PR to
+  # keep the noise down.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    labels:
+      - dependencies
+    groups:
+      actions:
+        patterns:
+          - '*'
